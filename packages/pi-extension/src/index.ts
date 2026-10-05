@@ -20,7 +20,14 @@ import { shrinkToolResult } from "./tool-output.ts";
 
 const HEALTH_TIMEOUT_MS = 750;
 const RECOVERY_TOOL = "caveman_retrieve";
-const PI_EXTENSION_LOCK = Symbol.for("caveman.pi.extension.loaded");
+// Pi rejects a launch outright when two extensions register the same tool name,
+// so a second Caveman copy must be a no-op. The claim is per load pass, not per
+// process: pi re-runs every factory on ctx.reload() after emitting
+// session_shutdown, so the winner releases there and re-claims in the new pass
+// instead of silently losing caveman_retrieve on reload.
+const PI_EXTENSION_CLAIM = Symbol.for("caveman.pi.extension.claim");
+
+type ExtensionClaim = object;
 
 function cavemanHome(): string {
   return process.env.CAVEMAN_HOME || join(homedir(), ".caveman");
@@ -97,8 +104,9 @@ async function readLiveRunState(gateway: string): Promise<RunState | undefined> 
 
 export default function (pi: ExtensionAPI) {
   const globalState = globalThis as Record<PropertyKey, unknown>;
-  if (globalState[PI_EXTENSION_LOCK]) return;
-  globalState[PI_EXTENSION_LOCK] = true;
+  if (globalState[PI_EXTENSION_CLAIM]) return;
+  const claim: ExtensionClaim = {};
+  globalState[PI_EXTENSION_CLAIM] = claim;
 
   const bridge = new HookBridge();
   const recovery = new RecoveryClient();
@@ -277,6 +285,7 @@ export default function (pi: ExtensionAPI) {
   }));
 
   pi.on("session_shutdown", GUARD_session_shutdown(async (_event: unknown, ctx: ExtensionContext) => {
+    if (globalState[PI_EXTENSION_CLAIM] === claim) delete globalState[PI_EXTENSION_CLAIM];
     await bridge.call("SessionEnd", { session_id: sessionId });
     await router?.closeGate(ctx);
     recovery.dispose();

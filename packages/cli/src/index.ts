@@ -5435,7 +5435,7 @@ async function agentShortcut(rest: string[]) {
   }
   const code = await new Promise<number>((resolve, reject) => {
     const invocation = portableInvocation(bin, native === "pi"
-      ? [...agent.args, "--extension", join(homedir(), ".pi", "agent", "extensions", "caveman-native.js"), ...rest.slice(1)]
+      ? [...agent.args, "--extension", piExtensionLoadPath(), ...rest.slice(1)]
       : [...agent.args, ...rest.slice(1)]);
     let child: ReturnType<typeof spawn>;
     try {
@@ -8052,11 +8052,19 @@ function opencodeNativeMutations(gw: string, mcpBinary: string): NativeMutation[
   ];
 }
 
-function piNativeMutations(): NativeMutation[] {
-  const extensionDir = join(homedir(), ".pi", "agent", "extensions");
+function piNativeExtensionDir(): string {
+  return join(homedir(), ".pi", "agent", "extensions");
+}
+
+function piNativeExtensionPath(): string {
   // Pi's extension auto-discovery accepts only .ts/.js (isExtensionFile in
   // pi-coding-agent 0.84.2); a .mjs here would journal fine and never load.
-  const extensionPath = join(extensionDir, "caveman-native.js");
+  return join(piNativeExtensionDir(), "caveman-native.js");
+}
+
+function piNativeMutations(): NativeMutation[] {
+  const extensionDir = piNativeExtensionDir();
+  const extensionPath = piNativeExtensionPath();
   const before = fileBytes(extensionPath);
   if (before && !before.toString("utf8").includes("caveman:native-pi")) {
     throw new Error(`${extensionPath} already exists and is not Caveman-owned; refusing to overwrite it`);
@@ -11682,8 +11690,18 @@ function resolvePiExtension(): string {
   return extension;
 }
 
+// Pi auto-discovers ~/.pi/agent/extensions/*.js, so `caveman enable pi`'s durable
+// artifact is already in the load set. Naming that same path from a door collapses
+// into the copy pi loads itself (deduped by canonical path) instead of a second
+// caveman_retrieve owner — and a hard launch abort, since pi rejects duplicate tool
+// names outright. Only a machine with no artifact gets the bundled copy injected.
+function piExtensionLoadPath(): string {
+  const installed = piNativeExtensionPath();
+  return existsSync(installed) ? installed : resolvePiExtension();
+}
+
 function buildPiWrapArgs(cmdArgs: string[], env: NodeJS.ProcessEnv, gw: string): string[] {
-  const extension = resolvePiExtension();
+  const extension = piExtensionLoadPath();
   const { cmd, pre } = cavemanInvocation();
   env.CAVEMAN_PI_HOOK_CMD = JSON.stringify([cmd, ...pre]);
   env.CAVE_GATEWAY_URL = gw;
@@ -11691,7 +11709,7 @@ function buildPiWrapArgs(cmdArgs: string[], env: NodeJS.ProcessEnv, gw: string):
   // compiled registry the single source of truth for how the asset is loaded.
   const profile = AGENTS.find((a) => a.id === "pi");
   const loaderFlag = profile?.injection.method === "native-extension" ? profile.injection.loader_flag : "--extension";
-  return ["--no-extensions", loaderFlag, extension, ...cmdArgs];
+  return [loaderFlag, extension, ...cmdArgs];
 }
 
 const HERMES_MCP_BEGIN = "# >>> caveman:mcp";

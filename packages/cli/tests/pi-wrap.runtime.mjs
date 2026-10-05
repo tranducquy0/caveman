@@ -80,13 +80,38 @@ test("wrap and run pi put extension first and stamp native hook environment", as
       const out = await run(fx, command);
       assert.equal(out.code, 0, out.stderr);
       const seen = JSON.parse(readFileSync(fx.capture, "utf8"));
-      assert.deepEqual(seen.argv, ["--no-extensions", "--extension", extension, "--", "--print", "hi"]);
+      assert.deepEqual(seen.argv, ["--extension", extension, "--", "--print", "hi"]);
       const hook = JSON.parse(seen.hook);
       assert.ok(Array.isArray(hook));
       assert.ok(hook.length >= 1);
       assert.ok(hook.every((value) => typeof value === "string" && value.length > 0));
       assert.equal(seen.gateway, fx.env.CAVE_GATEWAY_URL);
       assert.deepEqual(seen.baseUrls, {}, "native-extension wraps must not receive generic base-URL routing");
+    } finally {
+      fx.cleanup();
+    }
+  }
+});
+
+test("wrap pi loads the enable-installed artifact instead of a second caveman_retrieve owner", async () => {
+  for (const command of ["wrap", "run"]) {
+    const fx = fixture();
+    try {
+      const bundled = join(fx.root, "bundled extension fixture.mjs");
+      writeFileSync(bundled, "export default function fixture() {}\n");
+      fx.env.CAVEMAN_PI_EXTENSION = bundled;
+      const installed = join(fx.env.HOME, ".pi", "agent", "extensions", "caveman-native.js");
+      mkdirSync(dirname(installed), { recursive: true });
+      writeFileSync(installed, "// caveman:native-pi\nexport default function fixture() {}\n");
+      const out = await run(fx, command);
+      assert.equal(out.code, 0, out.stderr);
+      const seen = JSON.parse(readFileSync(fx.capture, "utf8"));
+      // Pi auto-discovers the artifact, so naming its own path is what collapses
+      // the two copies; a bundled path here would abort the whole launch on a
+      // duplicate tool name, and --no-extensions would take the user's other
+      // pi packages down with it.
+      assert.deepEqual(seen.argv, ["--extension", installed, "--", "--print", "hi"]);
+      assert.ok(!seen.argv.includes("--no-extensions"), "unrelated user extensions must stay loaded");
     } finally {
       fx.cleanup();
     }
@@ -122,7 +147,7 @@ test("wrap pi preserves extension paths containing spaces byte-exact", async () 
     fx.env.CAVEMAN_PI_EXTENSION = extension;
     const out = await run(fx);
     assert.equal(out.code, 0, out.stderr);
-    assert.equal(JSON.parse(readFileSync(fx.capture, "utf8")).argv[2], extension);
+    assert.equal(JSON.parse(readFileSync(fx.capture, "utf8")).argv[1], extension);
   } finally {
     fx.cleanup();
   }
