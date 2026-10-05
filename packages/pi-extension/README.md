@@ -36,7 +36,10 @@ One extension, four jobs:
 - **Honest fallback** — routing activates only after the recovery gate holds
   (proxy alive, recovery contract matched, MCP child initialized). Anything else
   is a visible pass-through: direct provider, one notice, no savings claims.
-  OAuth/subscription-authenticated models are never routed.
+  OAuth/subscription-authenticated models stay direct, except the verified
+  `openai-codex` ChatGPT route: its existing `/chatgpt` adapter preserves OAuth
+  headers without exposing or rewriting credentials, and missing route/header
+  proof stays direct.
 
 ## Install
 

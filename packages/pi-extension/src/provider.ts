@@ -10,6 +10,18 @@ import { MAX_MESSAGE_BYTES, boundedString, compatUpstreamFor, hostOf, isLoopback
 
 type Notify = (message: string, kind: "warning" | "info") => void;
 
+function codexSubscriptionRoute(model: NonNullable<ExtensionContext["model"]>, route: string | undefined, gateway: string): boolean {
+  return model.provider === "openai-codex" && route === `${gateway.replace(/\/+$/, "")}/chatgpt`;
+}
+
+function codexSubscriptionHeaderIssue(headers: Record<string, unknown>): string | undefined {
+  const authorization = headers.authorization ?? headers.Authorization;
+  if (typeof authorization !== "string" || !/^Bearer +\S+$/i.test(authorization.trim())) return "Authorization";
+  const account = Object.entries(headers).find(([name]) => name.toLowerCase() === "chatgpt-account-id")?.[1];
+  if (typeof account !== "string" || !account.trim()) return "ChatGPT-Account-ID";
+  return undefined;
+}
+
 export class ProviderRouter {
   private pi: ExtensionAPI;
   private notify: Notify;
@@ -86,14 +98,14 @@ export class ProviderRouter {
     } catch {
       // Cannot determine the auth kind ⇒ treat as OAuth and refuse (uncertain ⇒ direct).
     }
-    if (!oauth && route && !compatibilityIssue) {
+    const codexOAuthRoute = !!route && codexSubscriptionRoute(model, route, this.gateway);
+    if (route && (!oauth || codexOAuthRoute) && !compatibilityIssue) {
       try {
-        // Pi adds configured provider/auth headers during request preparation;
-        // they need not appear on model.headers. Use its public resolver and
-        // discard the API key. Never log values or replace the auth handler.
+        // Resolve headers only. The OAuth token stays in Pi's auth handler and
+        // is never copied into apiKey, model data, logs, or a replacement auth scheme.
         const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
         if (!auth.ok) throw new Error("request auth unavailable");
-        const { headers } = auth;
+        const headers = auth.headers ?? {};
         const published = {
           ...(this.compatUpstreams ? { compat_upstreams: this.compatUpstreams } : {}),
           ...(this.compatForwardHeaders ? { compat_forward_headers: this.compatForwardHeaders } : {}),
@@ -108,6 +120,11 @@ export class ProviderRouter {
             : `configure compat.${model.provider}.forward_headers`;
           headerIssue = `provider headers ${missingHeaders.join(", ")} are not forwarded; ${remedy}`;
         }
+        const effectiveHeaders = { ...(model.headers ?? {}), ...headers };
+        if (!headerIssue && codexOAuthRoute) {
+          const missing = codexSubscriptionHeaderIssue(effectiveHeaders);
+          if (missing) headerIssue = `ChatGPT subscription header ${missing} is unavailable; keep the provider direct`;
+        }
         if (!headerIssue) {
           let sessionId: string | undefined;
           try { sessionId = ctx.sessionManager.getSessionId(); } catch { /* unknown session affinity stays direct */ }
@@ -121,13 +138,13 @@ export class ProviderRouter {
       // closes/reopens. A stale result must never select its old model again.
       if (!this.gateOpen || this.gateGeneration !== gateGeneration || ctx.model !== model) return;
     }
-    if (!route || oauth || compatibilityIssue || headerIssue) {
+    if (!route || (oauth && !codexOAuthRoute) || compatibilityIssue || headerIssue) {
       if (!(await this.restoreCurrentModel(ctx))) return;
       if (!this.warnedModels.has(key)) {
         this.warnedModels.add(key);
         const mount = compatUpstreamFor(model.provider, this.compatUpstreams);
         const expected = mount !== undefined ? hostOf(mount) : upstreamHostFor(model.provider);
-        const reason = oauth
+        const reason = oauth && !codexOAuthRoute
           ? "OAuth/subscription credentials are not routed"
           : compatibilityIssue ?? headerIssue ?? (expected === undefined
             ? `no compat mount named "${model.provider}" in the local proxy; add compat.${model.provider}.base_url to caveman.yaml to route it`

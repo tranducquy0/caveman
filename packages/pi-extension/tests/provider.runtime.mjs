@@ -98,6 +98,46 @@ test("OAuth and unknown auth restore the active routed model before claiming dir
   }
 });
 
+test("verified Codex subscription route preserves OAuth headers without rewriting credentials", async () => {
+  const original = { provider: "openai-codex", id: "gpt-5.6-luna", api: "openai-chatgpt-responses", baseUrl: "https://chatgpt.com/backend-api/codex" };
+  const h = harness([original]);
+  h.setOAuth(true);
+  h.setAuthBehavior(() => ({ ok: true, apiKey: "must-not-be-used", headers: {
+    Authorization: "Bearer private-oauth-token", "ChatGPT-Account-ID": "private-account-id",
+  }}));
+  await h.router.openGate(GATEWAY, h.ctx, {}, { "openai-codex": "https://chatgpt.com/backend-api/codex" });
+  assert.equal(h.ctx.model.baseUrl, `${GATEWAY}/chatgpt`);
+  assert.equal(h.router.routing(), true);
+  assert.doesNotMatch(h.notices.join("\n"), /private-oauth-token|private-account-id|must-not-be-used/);
+  assert.deepEqual(h.ctx.model, { ...original, baseUrl: `${GATEWAY}/chatgpt` });
+});
+
+test("Codex OAuth stays direct when subscription route metadata or headers are invalid", async () => {
+  for (const [upstreams, headers] of [
+    [{}, { Authorization: "Bearer private-oauth-token", "ChatGPT-Account-ID": "private-account-id" }],
+    [{ "openai-codex": "https://chatgpt.com/backend-api/other" }, { Authorization: "Bearer private-oauth-token", "ChatGPT-Account-ID": "private-account-id" }],
+    [{ "openai-codex": "https://chatgpt.com/backend-api/codex" }, { Authorization: "Bearer private-oauth-token" }],
+  ]) {
+    const original = { provider: "openai-codex", id: "gpt-5.6-luna", api: "openai-chatgpt-responses", baseUrl: "https://chatgpt.com/backend-api/codex" };
+    const h = harness([original]);
+    h.setOAuth(true);
+    h.setAuthBehavior(() => ({ ok: true, apiKey: "must-not-be-used", headers }));
+    await h.router.openGate(GATEWAY, h.ctx, {}, upstreams);
+    assert.equal(h.router.routing(), false);
+    assert.deepEqual(h.ctx.model, original);
+    assert.doesNotMatch(h.notices.join("\n"), /private-oauth-token|private-account-id|must-not-be-used/);
+  }
+});
+
+test("an unrelated OAuth provider remains direct", async () => {
+  const original = { provider: "openai", id: "oauth-model", api: "openai-responses", baseUrl: "https://api.openai.com/v1" };
+  const h = harness([original]);
+  h.setOAuth(true);
+  await h.router.openGate(GATEWAY, h.ctx, {}, { openai: "https://api.openai.com" });
+  assert.equal(h.router.routing(), false);
+  assert.deepEqual(h.ctx.model, original);
+});
+
 test("resume and repeated gate openings reapply from the original endpoint", async () => {
   const h = harness();
   await h.router.openGate(GATEWAY, h.ctx, COMPAT, NATIVE);

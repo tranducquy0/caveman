@@ -90,8 +90,9 @@ export function normalizeRecoveryHandle(value: unknown): string | undefined {
 
 // This route table maps each Pi model API to a path under the local gateway.
 // An API that is not in this table is unsupported, for example azure, bedrock,
-// vertex, mistral, and codex-responses. The extension never routes such an API,
-// because it does not guess a wire protocol.
+// vertex, mistral, and unverified codex-responses. The extension never routes
+// such an API, because it does not guess a wire protocol. The verified
+// openai-codex ChatGPT route is handled separately by provider-routing.ts.
 export const ROUTES_BY_API: Readonly<Record<string, string>> = {
   "anthropic-messages": "/w/pi",
   "openai-completions": "/w/pi/openai/v1",

@@ -46,12 +46,15 @@ test("route table maps supported APIs and refuses everything else", () => {
   assert.equal(Object.keys(ROUTES_BY_API).length, 4);
 });
 
-const NATIVE = { openai: "https://api.openai.com", anthropic: "https://api.anthropic.com", gemini: "https://generativelanguage.googleapis.com" };
+const NATIVE = { openai: "https://api.openai.com", anthropic: "https://api.anthropic.com", gemini: "https://generativelanguage.googleapis.com", "openai-codex": "https://chatgpt.com/backend-api/codex" };
 const BUILTIN_COMPAT = { "opencode-go": "https://opencode.ai/zen/go" };
 
 test("route gate compares the original provider endpoint with the running proxy", () => {
   const gw = "http://127.0.0.1:8787";
   assert.equal(routeForApi(gw, "openai-completions", "openai", "https://api.openai.com/v1", BUILTIN_COMPAT, NATIVE), `${gw}/w/pi/openai/v1`);
+  assert.equal(routeForApi(gw, "openai-chatgpt-responses", "openai-codex", "https://chatgpt.com/backend-api/codex", {}, NATIVE), `${gw}/chatgpt`);
+  assert.equal(routeForApi(gw, "openai-chatgpt-responses", "openai-codex", "https://chatgpt.com/backend-api/other", {}, NATIVE), undefined);
+  assert.equal(routeForApi(gw, "openai-chatgpt-responses", "openai-codex", "https://chatgpt.com/backend-api/codex", {}, {}), undefined);
   assert.equal(routeForApi(gw, "openai-completions", "openai", "http://127.0.0.1:4000/v1", BUILTIN_COMPAT, NATIVE), undefined, "a local relay named openai must stay direct");
   assert.equal(routeForApi(gw, "openai-completions", "openai", "https://my-resource.openai.azure.com/openai", BUILTIN_COMPAT, NATIVE), undefined, "Azure named openai must stay direct");
   assert.equal(routeForApi(gw, "anthropic-messages", "anthropic", "https://api.anthropic.com", BUILTIN_COMPAT, NATIVE), `${gw}/w/pi/anthropic`);

@@ -473,6 +473,9 @@ func ProviderUpstreams(cfg config.Config) map[string]string {
 		"anthropic": cfg.BaseURL("anthropic", "https://api.anthropic.com"),
 		"openai":    cfg.BaseURL("openai", "https://api.openai.com"),
 		"gemini":    cfg.BaseURL("gemini", "https://generativelanguage.googleapis.com"),
+		// Pi's openai-codex OAuth adapter must prove this exact upstream before
+		// the extension may select the OAuth-preserving /chatgpt route.
+		"openai-codex": "https://chatgpt.com/backend-api/codex",
 	}
 }
 

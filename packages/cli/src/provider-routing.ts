@@ -64,6 +64,17 @@ export function verifiedProviderRoute(
 ): string | undefined {
   const original = endpoint(originalBaseUrl);
   if (!original || !endpoint(gateway)) return undefined;
+  // The Pi/OpenAI Codex adapter uses a distinct API name, but its verified
+  // local route is the same OAuth-preserving ChatGPT adapter used by `wrap
+  // codex`. Keep this exception provider- and metadata-scoped.
+  if (provider === 'openai-codex' && (api === 'openai-chatgpt-responses' || api === 'openai-responses')) {
+    const upstream = endpoint(published?.provider_upstreams?.['openai-codex']);
+    if (upstream && append(upstream, '/responses') === append(original, '/responses')) {
+      const routeBase = gateway.replace(/\/w\/pi\/?$/, '');
+      return trimTrailingSlashes(routeBase) + '/chatgpt';
+    }
+    return undefined;
+  }
   const family = api === 'anthropic-messages' ? 'anthropic'
     : api === 'openai-completions' || api === 'openai-responses' ? 'openai'
       : api === 'google-generative-ai' ? 'gemini' : undefined;
@@ -116,7 +127,8 @@ export function unforwardedProviderHeaders(api: string | undefined, provider: st
   if (headers == null) return [];
   if (typeof headers !== "object" || Array.isArray(headers)) return ["invalid header configuration"];
   const allowed = new Set(COPIED_HEADERS);
-  if (api === "openai-completions" || api === "openai-responses") allowed.add("authorization");
+  if (api === "openai-completions" || api === "openai-responses" || api === "openai-chatgpt-responses") allowed.add("authorization");
+  if (provider === "openai-codex" && (api === "openai-chatgpt-responses" || api === "openai-responses")) allowed.add("chatgpt-account-id");
   if (api === "anthropic-messages") { allowed.add("authorization"); allowed.add("x-api-key"); }
   if (api === "google-generative-ai") { allowed.add("authorization"); allowed.add("x-goog-api-key"); allowed.add("x-goog-user-project"); }
   if (published?.compat_upstreams && Object.hasOwn(published.compat_upstreams, provider)) {
