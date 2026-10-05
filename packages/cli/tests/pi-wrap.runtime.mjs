@@ -80,7 +80,7 @@ test("wrap and run pi put extension first and stamp native hook environment", as
       const out = await run(fx, command);
       assert.equal(out.code, 0, out.stderr);
       const seen = JSON.parse(readFileSync(fx.capture, "utf8"));
-      assert.deepEqual(seen.argv, ["--extension", extension, "--", "--print", "hi"]);
+      assert.deepEqual(seen.argv, ["--no-extensions", "--extension", extension, "--", "--print", "hi"]);
       const hook = JSON.parse(seen.hook);
       assert.ok(Array.isArray(hook));
       assert.ok(hook.length >= 1);
@@ -122,7 +122,7 @@ test("wrap pi preserves extension paths containing spaces byte-exact", async () 
     fx.env.CAVEMAN_PI_EXTENSION = extension;
     const out = await run(fx);
     assert.equal(out.code, 0, out.stderr);
-    assert.equal(JSON.parse(readFileSync(fx.capture, "utf8")).argv[1], extension);
+    assert.equal(JSON.parse(readFileSync(fx.capture, "utf8")).argv[2], extension);
   } finally {
     fx.cleanup();
   }

@@ -20,6 +20,7 @@ import { shrinkToolResult } from "./tool-output.ts";
 
 const HEALTH_TIMEOUT_MS = 750;
 const RECOVERY_TOOL = "caveman_retrieve";
+const PI_EXTENSION_LOCK = Symbol.for("caveman.pi.extension.loaded");
 
 function cavemanHome(): string {
   return process.env.CAVEMAN_HOME || join(homedir(), ".caveman");
@@ -95,6 +96,10 @@ async function readLiveRunState(gateway: string): Promise<RunState | undefined> 
 }
 
 export default function (pi: ExtensionAPI) {
+  const globalState = globalThis as Record<PropertyKey, unknown>;
+  if (globalState[PI_EXTENSION_LOCK]) return;
+  globalState[PI_EXTENSION_LOCK] = true;
+
   const bridge = new HookBridge();
   const recovery = new RecoveryClient();
   let router: ProviderRouter | undefined;

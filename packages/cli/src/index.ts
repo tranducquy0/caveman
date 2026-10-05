@@ -5428,11 +5428,18 @@ async function agentShortcut(rest: string[]) {
   } catch { /* runtime startup is fail-open; the native hook retries at SessionStart */ }
   if (native === "hermes") maybeWarnHermesMissingKey(agent, gatewayURL());
   const stopProxyKeepalive = startProxyKeepalive();
+  const launchEnv = { ...process.env };
+  if (native === "pi") {
+    const { cmd, pre } = cavemanInvocation();
+    launchEnv.CAVEMAN_PI_HOOK_CMD = JSON.stringify([cmd, ...pre]);
+  }
   const code = await new Promise<number>((resolve, reject) => {
-    const invocation = portableInvocation(bin, [...agent.args, ...rest.slice(1)]);
+    const invocation = portableInvocation(bin, native === "pi"
+      ? [...agent.args, "--extension", join(homedir(), ".pi", "agent", "extensions", "caveman-native.js"), ...rest.slice(1)]
+      : [...agent.args, ...rest.slice(1)]);
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(invocation.command, invocation.args, { stdio: "inherit" });
+      child = spawn(invocation.command, invocation.args, { stdio: "inherit", env: launchEnv });
     } catch (error) {
       // macOS reports some exec failures (e.g. ENOEXEC) synchronously — wrap
       // them like the async 'error' path so the message names the binary.
@@ -11684,7 +11691,7 @@ function buildPiWrapArgs(cmdArgs: string[], env: NodeJS.ProcessEnv, gw: string):
   // compiled registry the single source of truth for how the asset is loaded.
   const profile = AGENTS.find((a) => a.id === "pi");
   const loaderFlag = profile?.injection.method === "native-extension" ? profile.injection.loader_flag : "--extension";
-  return [loaderFlag, extension, ...cmdArgs];
+  return ["--no-extensions", loaderFlag, extension, ...cmdArgs];
 }
 
 const HERMES_MCP_BEGIN = "# >>> caveman:mcp";
