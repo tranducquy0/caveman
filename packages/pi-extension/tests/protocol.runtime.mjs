@@ -55,6 +55,13 @@ test("route gate compares the original provider endpoint with the running proxy"
   assert.equal(routeForApi(gw, "openai-chatgpt-responses", "openai-codex", "https://chatgpt.com/backend-api/codex", {}, NATIVE), `${gw}/chatgpt`);
   assert.equal(routeForApi(gw, "openai-chatgpt-responses", "openai-codex", "https://chatgpt.com/backend-api/other", {}, NATIVE), undefined);
   assert.equal(routeForApi(gw, "openai-chatgpt-responses", "openai-codex", "https://chatgpt.com/backend-api/codex", {}, {}), undefined);
+  // Pi's Codex adapter requests <base_url>/codex/responses, so its proof names
+  // the /codex backend the proxy publishes, not the literal metadata base_url.
+  assert.equal(routeForApi(gw, "openai-codex-responses", "openai-codex", "https://chatgpt.com/backend-api", {}, NATIVE), `${gw}/chatgpt`);
+  assert.equal(routeForApi(gw, "openai-codex-responses", "openai-codex", "https://chatgpt.com/backend-api/codex", {}, NATIVE), `${gw}/chatgpt`);
+  assert.equal(routeForApi(gw, "openai-codex-responses", "openai-codex", "https://chatgpt.com/backend-api/other", {}, NATIVE), undefined);
+  assert.equal(routeForApi(gw, "openai-codex-responses", "openai-codex", "https://chatgpt.com/backend-api", {}, {}), undefined);
+  assert.equal(routeForApi(gw, "openai-codex-responses", "openai-codex", "https://relay.example/v1", {}, NATIVE), undefined, "a relay named openai-codex must stay direct");
   assert.equal(routeForApi(gw, "openai-completions", "openai", "http://127.0.0.1:4000/v1", BUILTIN_COMPAT, NATIVE), undefined, "a local relay named openai must stay direct");
   assert.equal(routeForApi(gw, "openai-completions", "openai", "https://my-resource.openai.azure.com/openai", BUILTIN_COMPAT, NATIVE), undefined, "Azure named openai must stay direct");
   assert.equal(routeForApi(gw, "anthropic-messages", "anthropic", "https://api.anthropic.com", BUILTIN_COMPAT, NATIVE), `${gw}/w/pi/anthropic`);

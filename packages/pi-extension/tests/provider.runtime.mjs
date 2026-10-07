@@ -98,34 +98,45 @@ test("OAuth and unknown auth restore the active routed model before claiming dir
   }
 });
 
-test("verified Codex subscription route preserves OAuth headers without rewriting credentials", async () => {
-  const original = { provider: "openai-codex", id: "gpt-5.6-luna", api: "openai-chatgpt-responses", baseUrl: "https://chatgpt.com/backend-api/codex" };
-  const h = harness([original]);
+// Pi's openai-codex-responses metadata: the model's base_url is the plain
+// ChatGPT backend, and its adapter appends /codex/responses when it sends.
+const CODEX_MODEL = { provider: "openai-codex", id: "gpt-5.6-luna", api: "openai-codex-responses", baseUrl: "https://chatgpt.com/backend-api" };
+const CODEX_UPSTREAMS = { "openai-codex": "https://chatgpt.com/backend-api/codex" };
+
+test("verified Codex subscription route moves the endpoint and never copies Pi's credentials", async () => {
+  const h = harness([CODEX_MODEL]);
   h.setOAuth(true);
-  h.setAuthBehavior(() => ({ ok: true, apiKey: "must-not-be-used", headers: {
-    Authorization: "Bearer private-oauth-token", "ChatGPT-Account-ID": "private-account-id",
-  }}));
-  await h.router.openGate(GATEWAY, h.ctx, {}, { "openai-codex": "https://chatgpt.com/backend-api/codex" });
+  // Pi's Codex adapter keeps the OAuth token in its own auth handler and derives
+  // Authorization + ChatGPT-Account-ID per request, so the resolver yields the
+  // key but no headers.
+  h.setAuthBehavior(() => ({ ok: true, apiKey: "private-oauth-token" }));
+  await h.router.openGate(GATEWAY, h.ctx, {}, CODEX_UPSTREAMS);
+  assert.equal(h.router.routing(), true, h.notices.join("\n"));
+  assert.deepEqual(h.notices, []);
   assert.equal(h.ctx.model.baseUrl, `${GATEWAY}/chatgpt`);
-  assert.equal(h.router.routing(), true);
-  assert.doesNotMatch(h.notices.join("\n"), /private-oauth-token|private-account-id|must-not-be-used/);
-  assert.deepEqual(h.ctx.model, { ...original, baseUrl: `${GATEWAY}/chatgpt` });
+  assert.deepEqual(h.ctx.model, { ...CODEX_MODEL, baseUrl: `${GATEWAY}/chatgpt` });
+  assert.doesNotMatch(JSON.stringify(h.ctx.model), /private-oauth-token/);
 });
 
-test("Codex OAuth stays direct when subscription route metadata or headers are invalid", async () => {
-  for (const [upstreams, headers] of [
-    [{}, { Authorization: "Bearer private-oauth-token", "ChatGPT-Account-ID": "private-account-id" }],
-    [{ "openai-codex": "https://chatgpt.com/backend-api/other" }, { Authorization: "Bearer private-oauth-token", "ChatGPT-Account-ID": "private-account-id" }],
-    [{ "openai-codex": "https://chatgpt.com/backend-api/codex" }, { Authorization: "Bearer private-oauth-token" }],
-  ]) {
-    const original = { provider: "openai-codex", id: "gpt-5.6-luna", api: "openai-chatgpt-responses", baseUrl: "https://chatgpt.com/backend-api/codex" };
+test("Codex OAuth stays direct when the subscription route or auth kind is unverified", async () => {
+  const cases = [
+    { name: "no published subscription upstream", upstreams: {}, reason: /publishes no usable ChatGPT subscription upstream/ },
+    { name: "another published subscription upstream", upstreams: { "openai-codex": "https://chatgpt.com/backend-api/other" }, reason: /does not match the proxy's ChatGPT subscription target/ },
+    { name: "foreign endpoint", upstreams: CODEX_UPSTREAMS, baseUrl: "https://relay.example/v1", reason: /does not match the proxy's ChatGPT subscription target/ },
+    { name: "auth kind unknown", upstreams: CODEX_UPSTREAMS, oauth: new Error("auth status unavailable"), reason: /OAuth\/subscription credentials are not routed/ },
+    { name: "not OAuth", upstreams: CODEX_UPSTREAMS, oauth: false, reason: /ChatGPT subscription route requires OAuth/ },
+    { name: "header the proxy cannot forward", upstreams: CODEX_UPSTREAMS, headers: { "x-relay-only": "v" }, reason: /provider headers x-relay-only are not forwarded/ },
+  ];
+  for (const c of cases) {
+    const original = { ...CODEX_MODEL, ...(c.baseUrl ? { baseUrl: c.baseUrl } : {}), ...(c.headers ? { headers: c.headers } : {}) };
     const h = harness([original]);
-    h.setOAuth(true);
-    h.setAuthBehavior(() => ({ ok: true, apiKey: "must-not-be-used", headers }));
-    await h.router.openGate(GATEWAY, h.ctx, {}, upstreams);
-    assert.equal(h.router.routing(), false);
-    assert.deepEqual(h.ctx.model, original);
-    assert.doesNotMatch(h.notices.join("\n"), /private-oauth-token|private-account-id|must-not-be-used/);
+    h.setOAuth("oauth" in c ? c.oauth : true);
+    h.setAuthBehavior(() => ({ ok: true, apiKey: "private-oauth-token" }));
+    await h.router.openGate(GATEWAY, h.ctx, {}, c.upstreams);
+    assert.equal(h.router.routing(), false, c.name);
+    assert.deepEqual(h.ctx.model, original, c.name);
+    assert.match(h.notices.at(-1) ?? "", c.reason, c.name);
+    assert.doesNotMatch(h.notices.join("\n"), /private-oauth-token/, c.name);
   }
 });
 

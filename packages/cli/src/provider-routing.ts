@@ -48,6 +48,17 @@ function append(base: URL, path: string): string {
   return base.origin + base.pathname.replace(/\/+$/, '') + path;
 }
 
+// Pi's openai-codex-responses adapter requests <base>/codex/responses, so the
+// endpoint that has to agree with the proxy's subscription target is the
+// /codex backend, not the literal base_url. The other Codex wire names append
+// /responses to the base itself, so they compare base to base.
+function codexBackend(base: URL, api: string | undefined): string {
+  const path = trimTrailingSlashes(base.pathname);
+  if (api !== 'openai-codex-responses') return base.origin + path;
+  if (path.endsWith('/codex/responses')) return base.origin + path.slice(0, -'/responses'.length);
+  return base.origin + (path.endsWith('/codex') ? path : `${path}/codex`);
+}
+
 function compatTarget(base: URL, path: string): string {
   const leftPath = base.pathname.replace(/^\/+|\/+$/g, '');
   const rightPath = path.replace(/^\/+|\/+$/g, '');
@@ -67,9 +78,9 @@ export function verifiedProviderRoute(
   // The Pi/OpenAI Codex adapter uses a distinct API name, but its verified
   // local route is the same OAuth-preserving ChatGPT adapter used by `wrap
   // codex`. Keep this exception provider- and metadata-scoped.
-  if (provider === 'openai-codex' && (api === 'openai-chatgpt-responses' || api === 'openai-responses')) {
+  if (provider === 'openai-codex' && (api === 'openai-chatgpt-responses' || api === 'openai-codex-responses' || api === 'openai-responses')) {
     const upstream = endpoint(published?.provider_upstreams?.['openai-codex']);
-    if (upstream && append(upstream, '/responses') === append(original, '/responses')) {
+    if (upstream && codexBackend(original, api) === codexBackend(upstream, api)) {
       const routeBase = gateway.replace(/\/w\/pi\/?$/, '');
       return trimTrailingSlashes(routeBase) + '/chatgpt';
     }

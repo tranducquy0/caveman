@@ -14,14 +14,6 @@ function codexSubscriptionRoute(model: NonNullable<ExtensionContext["model"]>, r
   return model.provider === "openai-codex" && route === `${gateway.replace(/\/+$/, "")}/chatgpt`;
 }
 
-function codexSubscriptionHeaderIssue(headers: Record<string, unknown>): string | undefined {
-  const authorization = headers.authorization ?? headers.Authorization;
-  if (typeof authorization !== "string" || !/^Bearer +\S+$/i.test(authorization.trim())) return "Authorization";
-  const account = Object.entries(headers).find(([name]) => name.toLowerCase() === "chatgpt-account-id")?.[1];
-  if (typeof account !== "string" || !account.trim()) return "ChatGPT-Account-ID";
-  return undefined;
-}
-
 export class ProviderRouter {
   private pi: ExtensionAPI;
   private notify: Notify;
@@ -93,12 +85,24 @@ export class ProviderRouter {
       : undefined;
     let headerIssue: string | undefined;
     let oauth = true;
+    let authKnown = true;
     try {
       oauth = ctx.modelRegistry.isUsingOAuth(model);
     } catch {
       // Cannot determine the auth kind ⇒ treat as OAuth and refuse (uncertain ⇒ direct).
+      authKnown = false;
     }
+    // Pi's Codex adapter derives its Authorization and ChatGPT-Account-ID
+    // headers from the OAuth token when it sends, so the endpoint match is the
+    // whole proof for it — and its backend accepts nothing but OAuth. Keep the
+    // generic OAuth arm from masking either fact.
+    const chatGPTSubscription = model.provider === "openai-codex" && model.api === "openai-codex-responses";
     const codexOAuthRoute = !!route && codexSubscriptionRoute(model, route, this.gateway);
+    const authIssue = !authKnown || (oauth && !codexOAuthRoute && !chatGPTSubscription)
+      ? "OAuth/subscription credentials are not routed"
+      : !oauth && chatGPTSubscription && route
+        ? "ChatGPT subscription route requires OAuth"
+        : undefined;
     if (route && (!oauth || codexOAuthRoute) && !compatibilityIssue) {
       try {
         // Resolve headers only. The OAuth token stays in Pi's auth handler and
@@ -120,11 +124,6 @@ export class ProviderRouter {
             : `configure compat.${model.provider}.forward_headers`;
           headerIssue = `provider headers ${missingHeaders.join(", ")} are not forwarded; ${remedy}`;
         }
-        const effectiveHeaders = { ...(model.headers ?? {}), ...headers };
-        if (!headerIssue && codexOAuthRoute) {
-          const missing = codexSubscriptionHeaderIssue(effectiveHeaders);
-          if (missing) headerIssue = `ChatGPT subscription header ${missing} is unavailable; keep the provider direct`;
-        }
         if (!headerIssue) {
           let sessionId: string | undefined;
           try { sessionId = ctx.sessionManager.getSessionId(); } catch { /* unknown session affinity stays direct */ }
@@ -138,15 +137,18 @@ export class ProviderRouter {
       // closes/reopens. A stale result must never select its old model again.
       if (!this.gateOpen || this.gateGeneration !== gateGeneration || ctx.model !== model) return;
     }
-    if (!route || (oauth && !codexOAuthRoute) || compatibilityIssue || headerIssue) {
+    if (!route || authIssue || compatibilityIssue || headerIssue) {
       if (!(await this.restoreCurrentModel(ctx))) return;
       if (!this.warnedModels.has(key)) {
         this.warnedModels.add(key);
         const mount = compatUpstreamFor(model.provider, this.compatUpstreams);
         const expected = mount !== undefined ? hostOf(mount) : upstreamHostFor(model.provider);
-        const reason = oauth && !codexOAuthRoute
-          ? "OAuth/subscription credentials are not routed"
-          : compatibilityIssue ?? headerIssue ?? (expected === undefined
+        const publishedCodex = this.providerUpstreams?.["openai-codex"] ?? "";
+        const reason = authIssue ?? compatibilityIssue ?? headerIssue ?? (chatGPTSubscription
+          ? publishedCodex
+            ? `provider endpoint ${original} does not match the proxy's ChatGPT subscription target ${publishedCodex}`
+            : "the running proxy publishes no usable ChatGPT subscription upstream"
+          : expected === undefined
             ? `no compat mount named "${model.provider}" in the local proxy; add compat.${model.provider}.base_url to caveman.yaml to route it`
             : hostOf(original) !== expected
               ? `provider endpoint ${hostOf(original) ?? original} is not ${expected}`
