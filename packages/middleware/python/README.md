@@ -6,26 +6,22 @@ This quickstart targets middleware `1.0.0` and SDK `1.2.0`. Read the [release no
 
 ## Run a complete example
 
-Follow the [LangChain quickstart](https://docs.caveman.so/docs/sdk/middleware/python) for a fresh environment and [runtime installation](https://docs.caveman.so/docs/sdk/middleware/deployment#run-it-as-a-process). Start the local runtime separately; the client package does not include it.
+Follow the [LangChain quickstart](https://docs.caveman.so/integrations/frameworks) for a fresh environment and [runtime installation](https://docs.caveman.so/reference/faq). Start the local runtime separately; the client package does not include it.
 
 ```sh
 python -m pip install 'caveman-sdk==1.2.0' 'caveman-middleware[langchain]==1.0.0' 'langchain==1.4.1' 'langchain-core==1.6.3' 'langgraph==1.2.11'
-curl -fsSLo quickstart.py https://docs.caveman.so/examples/middleware/quickstart.py
-DEMO_MODE=record python quickstart.py
-DEMO_MODE=compress python quickstart.py
-DEMO_MODE=off python quickstart.py
 ```
 
-The default example makes no provider request. It runs a deterministic native model/tool loop against the real local runtime, checks compression and exact paginated recovery, and asserts that application history retains originals. The optional provider run is separately labeled and can incur charges.
+The framework guide above is the runnable walkthrough. A separate downloadable quickstart script is not published on the docs site.
 
 ## Choose an integration
 
-- [Framework guide](https://docs.caveman.so/docs/sdk/middleware/frameworks#python): public entrypoints, native APIs, recovery ownership, transports, and limitations.
-- [Compatibility matrix](https://docs.caveman.so/docs/sdk/middleware/frameworks): resolver ranges versus accepted ranges versus exact validation evidence. A range is not an exhaustive test result.
-- [Deployment](https://docs.caveman.so/docs/sdk/middleware/deployment): process/container lifecycle, remote TLS/authentication, persistence, session affinity, deadlines, and rollback.
+- [Framework guide](https://docs.caveman.so/integrations/frameworks): public entrypoints, native APIs, recovery ownership, transports, and limitations.
+- [Compatibility matrix](https://docs.caveman.so/integrations/frameworks): resolver ranges versus accepted ranges versus exact validation evidence. A range is not an exhaustive test result.
+- [Deployment](https://docs.caveman.so/reference/faq): process/container lifecycle, remote TLS/authentication, persistence, session affinity, deadlines, and rollback.
 - [Recovery and scope](https://github.com/JuliusBrussee/caveman/blob/main/docs/technical/middleware-protocol.md): namespace/session/branch/cache epoch, exact originals, excerpts, and expiry.
-- [Troubleshooting](https://docs.caveman.so/docs/sdk/troubleshooting#middleware): final reason codes and strict readiness versus normal inference fallback.
-- [Measurement](https://docs.caveman.so/docs/sdk/middleware/deployment#what-to-measure): quality, latency, retries, recovery calls, cache effects, and provider usage.
+- [Troubleshooting](https://docs.caveman.so/reference/troubleshooting): final reason codes and strict readiness versus normal inference fallback.
+- [Measurement](https://docs.caveman.so/reference/faq): quality, latency, retries, recovery calls, cache effects, and provider usage.
 
 ## Adapters, tiers, and what compresses
 

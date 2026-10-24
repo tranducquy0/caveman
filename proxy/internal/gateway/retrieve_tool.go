@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/JuliusBrussee/caveman/proxy/providers"
@@ -80,11 +81,7 @@ func injectRetrieveTool(provider, routePath string, body []byte) ([]byte, bool) 
 		if len(elements) > 0 {
 			prefix = []byte(",")
 		}
-		out := make([]byte, 0, len(body)+len(prefix)+len(toolBytes))
-		out = append(out, body[:insertAt]...)
-		out = append(out, prefix...)
-		out = append(out, toolBytes...)
-		out = append(out, body[insertAt:]...)
+		out := slices.Concat(body[:insertAt], prefix, toolBytes, body[insertAt:])
 		return out, json.Valid(out)
 	}
 
@@ -93,12 +90,7 @@ func injectRetrieveTool(provider, routePath string, body []byte) ([]byte, bool) 
 	if gatewayObjectEmpty(body, root) {
 		prefix = []byte(`"tools":[`)
 	}
-	out := make([]byte, 0, len(body)+len(prefix)+len(toolBytes)+1)
-	out = append(out, body[:insertAt]...)
-	out = append(out, prefix...)
-	out = append(out, toolBytes...)
-	out = append(out, ']')
-	out = append(out, body[insertAt:]...)
+	out := slices.Concat(body[:insertAt], prefix, toolBytes, []byte{']'}, body[insertAt:])
 	if !json.Valid(out) {
 		return body, false
 	}
@@ -123,7 +115,22 @@ func requestToolMatches(body []byte, match func(string) bool) bool {
 		return false
 	}
 	tools, _ := root["tools"].([]any)
-	return toolNameInList(tools, match)
+	if toolNameInList(tools, match) {
+		return true
+	}
+	// Codex (Desktop and newer CLI builds) declares its catalog in an input[]
+	// item {"type":"additional_tools","tools":[...]} instead of top-level tools.
+	input, _ := root["input"].([]any)
+	for _, item := range input {
+		im, _ := item.(map[string]any)
+		if im == nil || im["type"] != "additional_tools" {
+			continue
+		}
+		if tools, _ := im["tools"].([]any); toolNameInList(tools, match) {
+			return true
+		}
+	}
+	return false
 }
 
 type gatewayJSONSpan struct {
@@ -356,6 +363,18 @@ func toolNameInList(tools []any, match func(string) bool) bool {
 		}
 		if fn, _ := tm["function"].(map[string]any); fn != nil {
 			if n, _ := fn["name"].(string); match(n) {
+				return true
+			}
+		}
+		// Responses namespace {"type":"namespace","name":"mcp__caveman","tools":[...]}:
+		// the model-visible name of a member is the namespace joined to its name, so
+		// only that joined spelling may match — never the bare member name.
+		if tm["type"] == "namespace" {
+			ns, _ := tm["name"].(string)
+			members, _ := tm["tools"].([]any)
+			if ns != "" && toolNameInList(members, func(n string) bool {
+				return n != "" && match(strings.TrimSuffix(ns, "__")+"__"+n)
+			}) {
 				return true
 			}
 		}

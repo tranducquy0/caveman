@@ -19,7 +19,8 @@ function isAlive(pid) {
   }
 }
 
-async function waitUntil(predicate, { timeoutMs = 5000, intervalMs = 20 } = {}) {
+// 20s ceiling: starting two node processes took over 5s on a loaded machine.
+async function waitUntil(predicate, { timeoutMs = 20_000, intervalMs = 20 } = {}) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (predicate()) return;
@@ -67,8 +68,14 @@ for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
     const wrapper = spawn(process.execPath, [proxy, process.execPath, '-e', upstream], { stdio: 'ignore' });
 
     try {
-      await waitUntil(() => fs.existsSync(pidFile));
-      const upstreamPid = Number(fs.readFileSync(pidFile, 'utf8'));
+      // writeFileSync creates the file before it fills it, so an early read can
+      // be '' — and Number('') is 0, which isAlive() reports as alive forever
+      // (kill(0, 0) signals our own process group).
+      let upstreamPid = 0;
+      await waitUntil(() => {
+        try { upstreamPid = Number(fs.readFileSync(pidFile, 'utf8')); } catch { upstreamPid = 0; }
+        return upstreamPid > 0;
+      });
       assert.ok(isAlive(upstreamPid), 'upstream process should be running before the signal');
 
       wrapper.kill(signal);

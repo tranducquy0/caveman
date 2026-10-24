@@ -11,7 +11,7 @@ import (
 )
 
 const stubBase = "https://bedrock-runtime.us-east-1.amazonaws.com"
-const claudeModel = "anthropic.claude-3-5-sonnet-20241022-v2:0"
+const claudeModel = "global.anthropic.claude-sonnet-4-6"
 
 func newAdapter(t *testing.T) Adapter {
 	t.Helper()
@@ -121,6 +121,10 @@ func TestResolveUpstreamURL_MantleIsOptInAndUsesOfficialHost(t *testing.T) {
 	want := "https://bedrock-mantle.eu-west-1.api.aws/anthropic/v1/messages"
 	if got != want {
 		t.Fatalf("Mantle upstream = %q, want %q", got, want)
+	}
+	// The Mantle host comes from the configured endpoint, never the caller header.
+	if got, err := resolve(t, a, path, map[string]string{"x-cave-aws-region": "us-east-1"}); err == nil {
+		t.Fatalf("caller region steered Mantle host to %q", got)
 	}
 }
 

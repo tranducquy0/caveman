@@ -4,7 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"slices"
 )
+
+// maxSpliceBytes bounds the inputs of an edit so the output's size
+// arithmetic cannot overflow; no provider body comes near it.
+const maxSpliceBytes = 1 << 30
 
 type Span struct{ Start, End int }
 
@@ -141,11 +146,10 @@ func ReplaceRaw(body []byte, span Span, replacement []byte) ([]byte, error) {
 	if !json.Valid(replacement) {
 		return nil, fmt.Errorf("json splice: replacement is not valid JSON")
 	}
-	out := make([]byte, 0, len(body)-(span.End-span.Start)+len(replacement))
-	out = append(out, body[:span.Start]...)
-	out = append(out, replacement...)
-	out = append(out, body[span.End:]...)
-	return out, nil
+	if len(body) > maxSpliceBytes || len(replacement) > maxSpliceBytes {
+		return nil, fmt.Errorf("json splice: body too large")
+	}
+	return slices.Concat(body[:span.Start], replacement, body[span.End:]), nil
 }
 
 // AppendObjectFields inserts fields immediately before an object's closing
@@ -186,6 +190,9 @@ func AppendObjectFields(body []byte, object Span, fields ...FieldInsertion) ([]b
 		addition.Write(field.Value)
 	}
 
+	if len(body) > maxSpliceBytes || addition.Len() > maxSpliceBytes {
+		return nil, fmt.Errorf("json splice: body too large")
+	}
 	out := make([]byte, 0, len(body)+addition.Len())
 	out = append(out, body[:insertAt]...)
 	out = append(out, addition.Bytes()...)
@@ -224,6 +231,9 @@ func AppendArrayElements(body []byte, array Span, elements ...[]byte) ([]byte, e
 		addition.Write(element)
 	}
 
+	if len(body) > maxSpliceBytes || addition.Len() > maxSpliceBytes {
+		return nil, fmt.Errorf("json splice: body too large")
+	}
 	out := make([]byte, 0, len(body)+addition.Len())
 	out = append(out, body[:insertAt]...)
 	out = append(out, addition.Bytes()...)

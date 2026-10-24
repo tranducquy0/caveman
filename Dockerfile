@@ -5,7 +5,7 @@
 # nothing ever has to execute a foreign-arch binary during the build.
 # Base images are pinned by digest (the tag stays for readability); Dependabot's
 # docker ecosystem proposes digest bumps.
-FROM --platform=$BUILDPLATFORM golang:1.27.1-alpine@sha256:8a5910f31396cd4d89662f56c68b3ae31d374308270a1c3bd96672ee5ed43414 AS build
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine@sha256:b8c9b82affbbb82a020bbcf998dad2ba9516944ac7e883524642a481a9505e9c AS build
 ARG TARGETOS
 ARG TARGETARCH
 ARG VERSION=dev
@@ -24,7 +24,8 @@ COPY mem/ mem/
 COPY proxy/ proxy/
 COPY shared/ shared/
 
-# CGO_ENABLED=0 and -trimpath match scripts/build-release-binaries.mjs.
+# CGO_ENABLED=0: unlike the release caveman-proxy (cgo via zig, see
+# scripts/build-release-binaries.mjs), the image's code compressor parses Go only.
 # -buildvcs=false because .dockerignore keeps .git out of the build context.
 # -X main.version stamps `var version = "dev"` in proxy/cmd/caveman-proxy/main.go.
 RUN --mount=type=cache,target=/go/pkg/mod \

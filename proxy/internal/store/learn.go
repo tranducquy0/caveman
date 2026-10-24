@@ -348,7 +348,7 @@ func (s *Store) wrapMeasuredSince(since time.Time) *LearnWrapMeasured {
 	}
 	out := &LearnWrapMeasured{}
 	var bases string
-	err := s.db.QueryRow(`SELECT COUNT(*),
+	err := s.db.QueryRow(`SELECT COALESCE(SUM(CASE WHEN `+cacheWarmRow+` THEN 0 ELSE 1 END),0),
 		COALESCE(SUM(CASE WHEN COALESCE(compression_tokens_before,0) > COALESCE(compression_tokens_after,0) THEN 1 ELSE 0 END),0),
 		COALESCE(SUM(compression_tokens_before),0), COALESCE(SUM(compression_tokens_after),0),
 		COALESCE(SUM(would_save_tokens),0),
@@ -1255,7 +1255,7 @@ func normalizeSources(sources []string) map[string]bool {
 		}
 	}
 	if len(set) == 0 {
-		set = map[string]bool{"codex": true, "claude": true, "gemini": true, "opencode": true, "aider": true, "caveman": true}
+		set = map[string]bool{"codex": true, "claude": true, "gemini": true, "opencode": true, "aider": true, "pi": true, "caveman": true}
 	}
 	return set
 }

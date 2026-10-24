@@ -3,6 +3,7 @@ package engine
 import (
 	"bytes"
 	"encoding/json"
+	"encoding/xml"
 	"regexp"
 
 	"github.com/JuliusBrussee/caveman/engine/compressors"
@@ -22,6 +23,7 @@ const (
 	TypeTerminal     = "terminal"
 	TypeTabular      = "tabular"
 	TypeConfig       = "config"
+	TypeTestReport   = "test-report"
 )
 
 var (
@@ -35,6 +37,9 @@ var (
 	// A raw ANSI/CSI escape is the conclusive terminal signal — nothing but
 	// terminal/command output legitimately embeds one.
 	ansiEscRe = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
+	// htmlDeclarationRe matches a document declaration or an <html> tag, not
+	// <htmlReport> or any other tag that merely starts with the same letters.
+	htmlDeclarationRe = regexp.MustCompile(`(?i)^(<!doctype\s+html|<html[\s>/])`)
 )
 
 // Detect classifies a payload into a content type. It is deterministic and
@@ -49,7 +54,24 @@ func (e *Engine) Detect(input []byte) string {
 		return TypeText
 	}
 	if (trimmed[0] == '{' || trimmed[0] == '[') && json.Valid(trimmed) {
+		if trimmed[0] == '{' && looksLikeTestReportJSON(trimmed) && compressors.LooksTestReport(trimmed) {
+			return TypeTestReport
+		}
 		return TypeJSON
+	}
+	// JUnit runs before terminal so a report whose failure messages carry ANSI
+	// colors still routes to the test-report compressor, which strips them.
+	// Only a report that compressor accepts counts: Compress has no fallback,
+	// and the native runtime does not mask test-report output.
+	if looksLikeJUnitXML(trimmed) && compressors.LooksTestReport(trimmed) {
+		return TypeTestReport
+	}
+	// A page saved with a few stray carriage returns among its CRLF line ends is
+	// still a page: its document declaration outranks the bare-CR count below,
+	// which would otherwise route it to the terminal compressor. An ANSI escape
+	// stays conclusive for terminal output either way.
+	if hasHTMLDeclaration(trimmed) && !ansiEscRe.Match(input) {
+		return TypeHTML
 	}
 	// Terminal output is detected before diff/code/log because its ANSI-escape
 	// signal is conclusive: only raw command/terminal output carries it, so this
@@ -84,10 +106,14 @@ func (e *Engine) Detect(input []byte) string {
 // looksLikeTerminal detects raw terminal/command output deterministically. A raw
 // ANSI escape sequence is conclusive. A dense run of bare carriage returns (a
 // progress bar redrawing in place) is the secondary signal; CRLF line endings are
-// excluded so ordinary \r\n text never trips it.
+// excluded so ordinary \r\n text never trips it. CR-terminated (classic-Mac)
+// documents have no LFs and multiple bare CRs, so require an LF or ANSI escape.
 func looksLikeTerminal(input []byte) bool {
 	if ansiEscRe.Match(input) {
 		return true
+	}
+	if !bytes.Contains(input, []byte("\n")) {
+		return false
 	}
 	bareCR := bytes.Count(input, []byte("\r")) - bytes.Count(input, []byte("\r\n"))
 	return bareCR >= 3
@@ -137,8 +163,7 @@ func looksLikeCode(input []byte) bool {
 // text-extracted into garbage. Low confidence falls open to the next detector.
 func looksLikeHTML(input []byte) bool {
 	s := bytes.ToLower(bytes.TrimSpace(input))
-	// A document declaration is conclusive — source code never starts this way.
-	if bytes.HasPrefix(s, []byte("<!doctype html")) || bytes.HasPrefix(s, []byte("<html")) {
+	if hasHTMLDeclaration(s) {
 		return true
 	}
 	// Fragments: bail if it's source code embedding markup (JSX, HTML literals).
@@ -151,6 +176,12 @@ func looksLikeHTML(input []byte) bool {
 		bytes.Contains(s, []byte("<div")) ||
 		bytes.Contains(s, []byte("<p>")) || bytes.Contains(s, []byte("<p "))
 	return hasContainer && bytes.Count(s, []byte("<")) >= 6
+}
+
+// hasHTMLDeclaration reports whether trimmed opens with a document declaration
+// or an <html> tag. It is conclusive: source code never starts this way.
+func hasHTMLDeclaration(trimmed []byte) bool {
+	return htmlDeclarationRe.Match(trimmed[:min(len(trimmed), 32)])
 }
 
 // hasCodeStructure reports whether the payload carries source-code syntax that an
@@ -206,4 +237,44 @@ func looksLikeSearchResult(input []byte) bool {
 		}
 	}
 	return matched >= 4 && matched*3 >= len(lines)
+}
+
+// looksLikeTestReportJSON reads only the top-level keys of a JSON object: a
+// pytest-json-report has "exitcode" plus a "tests" array, a Jest report has
+// "numFailedTests" plus a "testResults" array. Keys nested deeper never count,
+// so unrelated JSON that mentions them keeps the JSON compressor.
+func looksLikeTestReportJSON(trimmed []byte) bool {
+	// Byte pre-check so ordinary JSON is not decoded a second time.
+	if !bytes.Contains(trimmed, []byte(`"exitcode"`)) && !bytes.Contains(trimmed, []byte(`"numFailedTests"`)) {
+		return false
+	}
+	var top map[string]json.RawMessage
+	if json.Unmarshal(trimmed, &top) != nil {
+		return false
+	}
+	isArray := func(key string) bool { v := top[key]; return len(v) > 0 && v[0] == '[' }
+	_, exitcode := top["exitcode"]
+	_, numFailed := top["numFailedTests"]
+	return (exitcode && isArray("tests")) || (numFailed && isArray("testResults"))
+}
+
+// looksLikeJUnitXML reports whether the document's root element is
+// <testsuites> or <testsuite>. Only the prolog (declaration, comments, doctype)
+// is read before that first element, so a diff or source file that mentions
+// JUnit tags never counts.
+func looksLikeJUnitXML(trimmed []byte) bool {
+	if trimmed[0] != '<' {
+		return false
+	}
+	dec := xml.NewDecoder(bytes.NewReader(trimmed))
+	for i := 0; i < 16; i++ {
+		tok, err := dec.RawToken()
+		if err != nil {
+			return false
+		}
+		if el, ok := tok.(xml.StartElement); ok {
+			return el.Name.Local == "testsuites" || el.Name.Local == "testsuite"
+		}
+	}
+	return false
 }
